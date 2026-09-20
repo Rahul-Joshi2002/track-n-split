@@ -1,0 +1,7 @@
+.env
+node_modules
+.git
+*.md
+auth_info*
+*service-account*.json
+*-credentials.json
