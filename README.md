@@ -72,14 +72,17 @@ Also confirm the sheet is shared with the service account email, and that the `M
 /help
 /status
 /paid 850 dinner /split equal all
-/paid 850 dinner /split equal @Asha @Vikram
+/paid amount description /split equal all
+/paid 1000 dinner /split me 400 @You 600
+/paid amount description /split person amount person amount …
 /balance
 /summary
 /undo
 ```
 
 - `/paid … /split equal all` — sender pays; split across every **active** member, including the payer.
-- `/paid … /split equal @Asha @Vikram` — named people (WhatsApp mentions and/or names from the Members sheet) are the full list. The payer is **not** added unless named.
+- `/paid … /split equal me @You` — named people (WhatsApp mentions and/or names from the Members sheet) are the full list. The payer is **not** added unless named. Use `me`, `@You`, `they`, or sheet names.
+- `/paid … /split me 700 @You 300` — unequal shares: alternate **person** and **amount**; each person once; share amounts must **sum exactly** to the paid total. Names can be `me`, `@You`, `they`, or sheet names. No `all`.
 - Amounts are rupees (`850`, `850.50`). Stored as integer paise.
 - Equal-split remainder (1 paise) goes to members in **JID order**.
 - `/undo` reverses the caller’s latest active expense. Rows are never deleted.

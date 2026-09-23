@@ -1,5 +1,5 @@
 /**
- * Parse a rupee amount into integer paise. Accepts 850, 850.5, 850.50, ₹850, 1,850.50.
+ * Parse a rupee amount into integer paise. Accepts 850, 850.5, 850.50, 850.500 (trailing zeros), ₹850, 1,850.50.
  * @param {string} raw
  * @returns {{ ok: true, paise: number } | { ok: false, error: string }}
  */
@@ -17,7 +17,10 @@ export function parseRupeesToPaise(raw) {
 
   const [whole, fraction = ""] = text.split(".")
   if (fraction.length > 2) {
-    return { ok: false, error: "Amount can have at most 2 decimal places" }
+    const extra = fraction.slice(2)
+    if (!/^0+$/.test(extra)) {
+      return { ok: false, error: "Amount can have at most 2 decimal places" }
+    }
   }
 
   const paise = Number(whole) * 100 + Number((fraction + "00").slice(0, 2))

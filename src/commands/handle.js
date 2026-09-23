@@ -53,19 +53,31 @@ async function handlePaid({ parsed, input, members, sender, ledger }) {
   if (!amount.ok) return amount.error
 
   let participants
+  let shares
   try {
-    participants = resolveParticipants({
-      split: parsed.split,
-      mentionTokens: parsed.mentionTokens,
-      mentionedJids: input.mentionedJids,
-      members,
-      payer: sender,
-    })
+    if (parsed.split === "custom") {
+      const built = buildCustomShares({
+        pairs: parsed.pairs,
+        totalPaise: amount.paise,
+        members,
+        payer: sender,
+        mentionedJids: input.mentionedJids,
+      })
+      shares = built.shares
+      participants = built.participants
+    } else {
+      participants = resolveParticipants({
+        split: parsed.split,
+        mentionTokens: parsed.mentionTokens,
+        mentionedJids: input.mentionedJids,
+        members,
+        payer: sender,
+      })
+      shares = splitEqual(amount.paise, participants)
+    }
   } catch (err) {
     return err.message
   }
-
-  const shares = splitEqual(amount.paise, participants)
   const txn = {
     id: newTxnId(),
     waMessageId: input.messageId,
@@ -173,6 +185,78 @@ async function formatStatus(state, startedAt, ledger) {
   ].join("\n")
 }
 
+function buildCustomShares({ pairs, totalPaise, members, payer, mentionedJids }) {
+  const shares = []
+  const usedJids = new Set()
+  const mentionQueue = [...(mentionedJids || [])]
+
+  for (const pair of pairs) {
+    const person = resolveOneParticipant(pair.personToken, {
+      members,
+      payer,
+      mentionQueue,
+      usedJids,
+    })
+    if (usedJids.has(normalizeJid(person.jid))) {
+      throw new Error(`Duplicate split for ${person.name}. Each person can appear once.`)
+    }
+    usedJids.add(normalizeJid(person.jid))
+
+    const shareAmount = parseRupeesToPaise(pair.amountRaw)
+    if (!shareAmount.ok) {
+      throw new Error(shareAmount.error)
+    }
+
+    shares.push({
+      jid: person.jid,
+      name: person.name,
+      paise: shareAmount.paise,
+    })
+  }
+
+  const sum = shares.reduce((acc, share) => acc + share.paise, 0)
+  if (sum !== totalPaise) {
+    throw new Error(
+      `Shares sum to ${formatPaise(sum)} but paid amount is ${formatPaise(totalPaise)}.`,
+    )
+  }
+
+  const participants = shares.map((share) => ({ jid: share.jid, name: share.name }))
+  return { shares, participants }
+}
+
+function resolveOneParticipant(token, { members, payer, mentionQueue, usedJids }) {
+  if (isMeToken(token)) {
+    return { jid: payer.jid, name: publicLabel(payer) }
+  }
+
+  const matches = matchName(members, token)
+  if (matches.length > 1) {
+    throw new Error(
+      `@${token} is ambiguous (${matches.map((m) => m.name).join(", ")}). Use a fuller name or a WhatsApp mention.`,
+    )
+  }
+  if (matches.length === 1) {
+    return { jid: matches[0].jid, name: publicLabel(matches[0]) }
+  }
+
+  while (mentionQueue.length) {
+    const jid = mentionQueue.shift()
+    const norm = normalizeJid(jid)
+    if (usedJids.has(norm)) continue
+    const active = members.filter((m) => m.active)
+    const member = findMember(active, jid) || findMember(members, jid)
+    if (!member) {
+      throw new Error(`Mentioned person is not an active trip member: ${jid}`)
+    }
+    return { jid: member.jid, name: publicLabel(member) }
+  }
+
+  throw new Error(
+    `No member matches @${token}. Use a WhatsApp mention, a sheet name/alias, or me. Example: /split me 400 @You 600`,
+  )
+}
+
 function resolveParticipants({ split, mentionTokens, mentionedJids, members, payer }) {
   const active = members.filter((m) => m.active)
   if (split === "all") {
@@ -202,7 +286,7 @@ function resolveParticipants({ split, mentionTokens, mentionedJids, members, pay
       // WhatsApp mentions already resolved by JID; leftover @Name text is not a sheet alias.
       if ((mentionedJids || []).length) continue
       throw new Error(
-        `No member matches @${token}. Use a WhatsApp mention, a sheet name/alias, or me. Example: /paid 850 dinner /split equal me @Asha`,
+        `No member matches @${token}. Use a WhatsApp mention, a sheet name/alias, or me. Example: /paid 850 dinner /split equal me @You`,
       )
     }
     if (matches.length > 1) {
@@ -214,7 +298,7 @@ function resolveParticipants({ split, mentionTokens, mentionedJids, members, pay
   }
 
   if (!found.size) {
-    throw new Error("Name who to split with. Example: /paid 850 dinner /split equal me @Asha")
+    throw new Error("Name who to split with. Example: /paid 850 dinner /split equal me @You")
   }
 
   return [...found.values()]

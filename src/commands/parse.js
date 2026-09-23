@@ -1,3 +1,5 @@
+import { parseRupeesToPaise } from "../ledger/money.js"
+
 /**
  * @typedef {"help"|"status"|"balance"|"summary"|"undo"|"paid"|"error"|"unknown"|"ignore"} CommandKind
  */
@@ -52,14 +54,15 @@ function parsePaid(raw) {
   }
 
   const splitMatch = right.match(/^\/split\s+equal\s+(.+)$/i)
-  if (!splitMatch) {
-    return {
-      kind: "error",
-      error: "Use /split equal all or /split equal @Asha @Vikram",
-    }
+  if (splitMatch) {
+    return parseEqualSplit(amountRaw, description, splitMatch[1])
   }
 
-  const tokens = splitMatch[1].trim().split(/\s+/).filter(Boolean)
+  return parseCustomSplit(amountRaw, description, right)
+}
+
+function parseEqualSplit(amountRaw, description, rest) {
+  const tokens = rest.trim().split(/\s+/).filter(Boolean)
   const mentionTokens = tokens
     .filter((token) => normalizeMentionToken(token) !== "all")
     .map(normalizeMentionToken)
@@ -76,11 +79,62 @@ function parsePaid(raw) {
   if (!mentionTokens.length) {
     return {
       kind: "error",
-      error: "Name who to split with. Example: /paid 850 dinner /split equal me @Asha",
+      error: "Name who to split with. Example: /paid 850 dinner /split equal me @You",
     }
   }
 
   return { kind: "paid", amountRaw, description, split: "named", mentionTokens }
+}
+
+function parseCustomSplit(amountRaw, description, right) {
+  const splitMatch = right.match(/^\/split\s+(.+)$/i)
+  if (!splitMatch) {
+    return {
+      kind: "error",
+      error: "Use /split equal all or /split me 700 @You 300",
+    }
+  }
+
+  const tokens = splitMatch[1].trim().split(/\s+/).filter(Boolean)
+  if (!tokens.length) {
+    return {
+      kind: "error",
+      error: "Add split pairs: person amount person amount. Example: /split me 400 @You 600",
+    }
+  }
+  if (tokens.length % 2 !== 0) {
+    return {
+      kind: "error",
+      error: "Custom split needs person-and-amount pairs. Example: /split me 700 @You 300",
+    }
+  }
+
+  /** @type {{ personToken: string, amountRaw: string }[]} */
+  const pairs = []
+  for (let i = 0; i < tokens.length; i += 2) {
+    const personRaw = tokens[i]
+    const shareAmountRaw = tokens[i + 1]
+    const personToken = normalizeMentionToken(personRaw)
+    if (!personToken) {
+      return { kind: "error", error: "Each share needs a person (me, @name, or sheet name)." }
+    }
+    if (personToken === "all") {
+      return {
+        kind: "error",
+        error: "Custom split cannot use all. List each person and their share amount.",
+      }
+    }
+    const shareAmount = parseRupeesToPaise(shareAmountRaw)
+    if (!shareAmount.ok) {
+      return {
+        kind: "error",
+        error: `Amount for ${personRaw} must be rupees (e.g. 300): ${shareAmount.error}`,
+      }
+    }
+    pairs.push({ personToken, amountRaw: shareAmountRaw })
+  }
+
+  return { kind: "paid", amountRaw, description, split: "custom", pairs }
 }
 
 function normalizeMentionToken(token) {
@@ -93,14 +147,15 @@ function normalizeMentionToken(token) {
 
 export const HELP_TEXT = [
   "Expense bot commands:",
-  "/paid 850 dinner /split equal all",
-  "/paid 850 dinner /split equal me @Asha",
-  "/paid 850 dinner /split equal @Asha @Vikram",
+  "/paid 1000 dinner /split equal all",
+  "paid 1000 dinner /split equal me @You",
+  "/paid 1000 dinner /split me 400 @You 600",
+  "names can be me, @ mention, or sheet names; alternate person and amount",
   "/balance",
   "/summary",
   "/undo",
   "/status",
   "",
-  "Amounts are rupees (850 or 850.50). Equal-split remainder (1 paise) goes to members in JID order.",
-  "Named splits use only the people you list. WhatsApp cannot @mention you — type me (or @me) to include yourself.",
+  "Amounts are rupees (850 or 850.50), at most 2 decimal places",
+  "Unequal shares must sum exactly to the paid amount",
 ].join("\n")
