@@ -3,22 +3,28 @@ import { parseRupeesToPaise } from "./money.js"
 
 export const MEMBER_HEADERS = ["jid", "display_name", "aliases", "active"]
 export const TXN_HEADERS = [
+  "serial",
+  "expense_at",
+  "description",
+  "payer_name",
+  "amount_formatted",
+  "participant_names",
+  "status",
   "id",
   "wa_message_id",
   "timestamp",
   "payer_jid",
-  "payer_name",
-  "amount_formatted",
-  "description",
   "participant_jids",
-  "participant_names",
   "split_count",
   "shares_json",
   "command_text",
-  "status",
   "reverses_id",
   "reversed_by_id",
 ]
+
+const EXPENSE_TIMEZONE = process.env.EXPENSE_TIMEZONE || "Asia/Kolkata"
+
+const TXN_SHEET_RANGE = `A:${columnLetter(TXN_HEADERS.length - 1)}`
 
 export class Ledger {
   /**
@@ -199,7 +205,8 @@ export class Ledger {
       if (existing.some((row) => row.waMessageId === txn.waMessageId)) {
         return "duplicate"
       }
-      await this.appendRow("Transactions", txnToRow(txn))
+      const serial = nextSerial(existing)
+      await this.appendRow("Transactions", txnToRow(enrichTxnForSheet(txn, serial)))
       return "created"
     } finally {
       this.inflight.delete(txn.waMessageId)
@@ -241,7 +248,8 @@ export class Ledger {
       reversesId: original.reversesId,
       reversedById: reversal.id,
     })
-    await this.appendRow("Transactions", txnToRow(reversal))
+    const serial = nextSerial(existing)
+    await this.appendRow("Transactions", txnToRow(enrichTxnForSheet(reversal, serial)))
     return { original, reversal }
   }
 
@@ -262,9 +270,11 @@ export class Ledger {
   }
 
   async readRows(tab, headers) {
+    const colRange =
+      tab === "Transactions" ? TXN_SHEET_RANGE : `A:${columnLetter(headers.length - 1)}`
     const res = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.sheetId,
-      range: `${tab}!A:P`,
+      range: `${tab}!${colRange}`,
     })
     const values = res.data.values || []
     if (values.length <= 1) return []
@@ -280,9 +290,11 @@ export class Ledger {
   }
 
   async appendRow(tab, values) {
+    const colRange =
+      tab === "Transactions" ? TXN_SHEET_RANGE : `A:${columnLetter(values.length - 1)}`
     await this.sheets.spreadsheets.values.append({
       spreadsheetId: this.sheetId,
-      range: `${tab}!A:P`,
+      range: `${tab}!${colRange}`,
       valueInputOption: "RAW",
       insertDataOption: "INSERT_ROWS",
       requestBody: { values: [values] },
@@ -295,12 +307,18 @@ export class Ledger {
       range: "Transactions!1:1",
     })
     const head = (res.data.values && res.data.values[0]) || TXN_HEADERS
-    const start = head.indexOf("status")
-    if (start < 0) {
-      throw new Error("Transactions sheet is missing a status column")
+    const fields = [
+      ["status", status],
+      ["reverses_id", reversesId || ""],
+      ["reversed_by_id", reversedById || ""],
+    ]
+    for (const [name, value] of fields) {
+      const col = head.indexOf(name)
+      if (col < 0) {
+        throw new Error(`Transactions sheet is missing a ${name} column`)
+      }
+      await this.updateCells(`Transactions!${columnLetter(col)}${rowNumber}`, [[value]])
     }
-    const range = `Transactions!${columnLetter(start)}${rowNumber}:${columnLetter(start + 2)}${rowNumber}`
-    await this.updateCells(range, [[status, reversesId || "", reversedById || ""]])
   }
 
   async updateCells(range, values) {
@@ -330,24 +348,67 @@ export function normalizeJid(jid) {
     .toLowerCase()
 }
 
+/** @param {string|Date} when */
+export function formatExpenseAt(when) {
+  const date = when instanceof Date ? when : new Date(when)
+  if (Number.isNaN(date.getTime())) return ""
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EXPENSE_TIMEZONE,
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).formatToParts(date)
+  const pick = (type) => parts.find((p) => p.type === type)?.value ?? ""
+  const day = pick("day")
+  const month = pick("month")
+  const year = pick("year")
+  const hour = pick("hour")
+  const minute = pick("minute")
+  const dayPeriod = pick("dayPeriod").toUpperCase()
+  return `${day} ${month} ${year}, ${hour}:${minute} ${dayPeriod}`
+}
+
+function nextSerial(transactions) {
+  let max = 0
+  for (const txn of transactions) {
+    const n = Number(txn.serial) || 0
+    if (n > max) max = n
+  }
+  return max + 1
+}
+
+function enrichTxnForSheet(txn, serial) {
+  return {
+    ...txn,
+    serial,
+    expenseAt: txn.expenseAt || formatExpenseAt(txn.timestamp),
+  }
+}
+
 function txnToRow(txn) {
-  return [
-    txn.id,
-    txn.waMessageId,
-    txn.timestamp,
-    txn.payerJid,
-    txn.payerName,
-    txn.amountFormatted,
-    txn.description,
-    txn.participantJids.join(","),
-    txn.participantNames.join(","),
-    String(txn.splitCount),
-    JSON.stringify(txn.shares),
-    txn.commandText,
-    txn.status,
-    txn.reversesId || "",
-    txn.reversedById || "",
-  ]
+  const record = {
+    serial: String(txn.serial ?? ""),
+    expense_at: txn.expenseAt ?? "",
+    description: txn.description,
+    payer_name: txn.payerName,
+    amount_formatted: txn.amountFormatted,
+    participant_names: txn.participantNames.join(","),
+    status: txn.status,
+    id: txn.id,
+    wa_message_id: txn.waMessageId,
+    timestamp: txn.timestamp,
+    payer_jid: txn.payerJid,
+    participant_jids: txn.participantJids.join(","),
+    split_count: String(txn.splitCount),
+    shares_json: JSON.stringify(txn.shares),
+    command_text: txn.commandText,
+    reverses_id: txn.reversesId || "",
+    reversed_by_id: txn.reversedById || "",
+  }
+  return TXN_HEADERS.map((key) => record[key] ?? "")
 }
 
 function rowToTxn(row) {
@@ -361,6 +422,7 @@ function rowToTxn(row) {
   const parsed = parseRupeesToPaise(row.amount_formatted)
   return {
     row: row.row,
+    serial: Number(row.serial) || 0,
     id: String(row.id || "").trim(),
     waMessageId: String(row.wa_message_id || "").trim(),
     timestamp: String(row.timestamp || "").trim(),

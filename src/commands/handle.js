@@ -111,7 +111,7 @@ async function handlePaid({ parsed, input, members, sender, ledger }) {
     .join(", ")
 
   return [
-    `Recorded ${txn.id}`,
+    `Recorded transaction`,
     `${publicLabel(sender)} paid ${txn.amountFormatted} for ${txn.description}`,
     `Split ${txn.splitCount} ways: ${shareText}`,
   ].join("\n")
@@ -127,7 +127,7 @@ async function handleUndo({ input, sender, ledger }) {
   if (!result) return "Nothing to undo."
 
   return [
-    `Reversed ${result.original.id}`,
+    `Reversed last transaction`,
     `${result.original.payerName} paid ${result.original.amountFormatted} for ${result.original.description}`,
   ].join("\n")
 }

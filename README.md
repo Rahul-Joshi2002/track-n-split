@@ -98,9 +98,11 @@ Create one spreadsheet with two tabs. Row 1 headers must be:
 
 **Transactions**
 
-`id` | `wa_message_id` | `timestamp` | `payer_jid` | `payer_name` | `amount_formatted` | `description` | `participant_jids` | `participant_names` | `split_count` | `shares_json` | `command_text` | `status` | `reverses_id` | `reversed_by_id`
+`serial` | `expense_at` | `description` | `payer_name` | `amount_formatted` | `participant_names` | `status` | `id` | `wa_message_id` | `timestamp` | `payer_jid` | `participant_jids` | `split_count` | `shares_json` | `command_text` | `reverses_id` | `reversed_by_id`
 
-Leave Transactions as headers only. Fill Members after the first WhatsApp connect (the bot logs participant JIDs).
+`expense_at` is human-readable local time (default timezone `Asia/Kolkata`; override with `EXPENSE_TIMEZONE`). `timestamp` stays ISO UTC for the bot.
+
+Leave Transactions empty (no header row) on a fresh setup: the bot writes row 1 on startup. Fill Members after the first WhatsApp connect (the bot logs participant JIDs).
 
 `active` is `TRUE` or `FALSE`. `aliases` is comma-separated (`asha,ash`).
 
