@@ -52,15 +52,21 @@ async function handlePaid({ parsed, input, members, sender, ledger }) {
   const amount = parseRupeesToPaise(parsed.amountRaw)
   if (!amount.ok) return amount.error
 
+  let payerMember
   let participants
   let shares
   try {
+    payerMember = resolvePayer(parsed.payerToken, {
+      members,
+      sender,
+      mentionedJids: input.mentionedJids,
+    })
     if (parsed.split === "custom") {
       const built = buildCustomShares({
         pairs: parsed.pairs,
         totalPaise: amount.paise,
         members,
-        payer: sender,
+        recorder: sender,
         mentionedJids: input.mentionedJids,
       })
       shares = built.shares
@@ -71,7 +77,7 @@ async function handlePaid({ parsed, input, members, sender, ledger }) {
         mentionTokens: parsed.mentionTokens,
         mentionedJids: input.mentionedJids,
         members,
-        payer: sender,
+        recorder: sender,
       })
       shares = splitEqual(amount.paise, participants)
     }
@@ -82,8 +88,10 @@ async function handlePaid({ parsed, input, members, sender, ledger }) {
     id: newTxnId(),
     waMessageId: input.messageId,
     timestamp: new Date().toISOString(),
-    payerJid: sender.jid,
-    payerName: publicLabel(sender),
+    payerJid: payerMember.jid,
+    payerName: payerMember.name,
+    enteredByJid: sender.jid,
+    enteredByName: publicLabel(sender),
     amountPaise: amount.paise,
     amountFormatted: formatPaise(amount.paise),
     description: parsed.description,
@@ -106,15 +114,17 @@ async function handlePaid({ parsed, input, members, sender, ledger }) {
 
   if (result === "duplicate") return null
 
-  const shareText = shares
-    .map((share) => `${share.name} ${formatPaise(share.paise)}`)
-    .join(", ")
-
-  return [
-    `Recorded transaction`,
-    `${publicLabel(sender)} paid ${txn.amountFormatted} for ${txn.description}`,
-    `Split ${txn.splitCount} ways: ${shareText}`,
-  ].join("\n")
+  const lines = ["*Transaction recorded*", ""]
+  lines.push(`${txn.payerName} paid *${txn.amountFormatted}* for _${txn.description}_`)
+  if (normalizeJid(txn.payerJid) !== normalizeJid(txn.enteredByJid)) {
+    lines.push(`Entered by ${txn.enteredByName}`)
+  }
+  lines.push("")
+  lines.push(`*Split (${txn.splitCount} ways)*`)
+  for (const share of shares) {
+    lines.push(`${share.name}  ${formatPaise(share.paise)}`)
+  }
+  return lines.join("\n")
 }
 
 async function handleUndo({ input, sender, ledger }) {
@@ -124,11 +134,13 @@ async function handleUndo({ input, sender, ledger }) {
   } catch (err) {
     return `Could not undo on the sheet: ${err.message}`
   }
-  if (!result) return "Nothing to undo."
+  if (!result) return "_Nothing to undo._"
 
+  const { original } = result
   return [
-    `Reversed last transaction`,
-    `${result.original.payerName} paid ${result.original.amountFormatted} for ${result.original.description}`,
+    "*Transaction reversed*",
+    "",
+    `${original.payerName} paid *${original.amountFormatted}* for _${original.description}_`,
   ].join("\n")
 }
 
@@ -147,23 +159,30 @@ async function handleReport({ kind, members, ledger }) {
   const lines = []
 
   if (kind === "summary") {
-    lines.push(`Total spent: ${formatPaise(totalSpent(active))}`)
+    lines.push("*Summary*")
+    lines.push("")
+    lines.push(`*Total spent:* ${formatPaise(totalSpent(active))}`)
+    lines.push("")
+    lines.push("*Balances*")
+    lines.push("")
+  } else {
+    lines.push("*Balances*")
     lines.push("")
   }
 
-  lines.push("Balances:")
   for (const net of nets) {
     const sign = net.netPaise > 0 ? "+" : ""
-    lines.push(`${net.name} ${sign}${formatPaise(net.netPaise)}`)
+    lines.push(`${net.name}  ${sign}${formatPaise(net.netPaise)}`)
   }
 
   lines.push("")
   if (!settlements.length) {
-    lines.push("Settlements: none")
+    lines.push("*Settlements*")
+    lines.push("_None needed — everyone is square._")
   } else {
-    lines.push("Suggested settlements:")
+    lines.push("*Suggested settlements*")
     for (const s of settlements) {
-      lines.push(`${s.fromName} → ${s.toName} ${formatPaise(s.paise)}`)
+      lines.push(`${s.fromName} → ${s.toName}  ${formatPaise(s.paise)}`)
     }
   }
 
@@ -185,7 +204,23 @@ async function formatStatus(state, startedAt, ledger) {
   ].join("\n")
 }
 
-function buildCustomShares({ pairs, totalPaise, members, payer, mentionedJids }) {
+function resolvePayer(payerToken, { members, sender, mentionedJids }) {
+  if (!payerToken) {
+    return { jid: sender.jid, name: publicLabel(sender) }
+  }
+  if (isMeToken(payerToken)) {
+    return { jid: sender.jid, name: publicLabel(sender) }
+  }
+  const mentionQueue = [...(mentionedJids || [])]
+  return resolveOneParticipant(payerToken, {
+    members,
+    recorder: sender,
+    mentionQueue,
+    usedJids: new Set(),
+  })
+}
+
+function buildCustomShares({ pairs, totalPaise, members, recorder, mentionedJids }) {
   const shares = []
   const usedJids = new Set()
   const mentionQueue = [...(mentionedJids || [])]
@@ -193,7 +228,7 @@ function buildCustomShares({ pairs, totalPaise, members, payer, mentionedJids })
   for (const pair of pairs) {
     const person = resolveOneParticipant(pair.personToken, {
       members,
-      payer,
+      recorder,
       mentionQueue,
       usedJids,
     })
@@ -225,9 +260,9 @@ function buildCustomShares({ pairs, totalPaise, members, payer, mentionedJids })
   return { shares, participants }
 }
 
-function resolveOneParticipant(token, { members, payer, mentionQueue, usedJids }) {
+function resolveOneParticipant(token, { members, recorder, mentionQueue, usedJids }) {
   if (isMeToken(token)) {
-    return { jid: payer.jid, name: publicLabel(payer) }
+    return { jid: recorder.jid, name: publicLabel(recorder) }
   }
 
   const matches = matchName(members, token)
@@ -253,11 +288,11 @@ function resolveOneParticipant(token, { members, payer, mentionQueue, usedJids }
   }
 
   throw new Error(
-    `No member matches @${token}. Use a WhatsApp mention, a sheet name/alias, or me. Example: /split me 400 @You 600`,
+    `No member matches @${token}. Use a WhatsApp mention, a sheet name/alias, or me. Example: /split me 400 @Name 600`,
   )
 }
 
-function resolveParticipants({ split, mentionTokens, mentionedJids, members, payer }) {
+function resolveParticipants({ split, mentionTokens, mentionedJids, members, recorder }) {
   const active = members.filter((m) => m.active)
   if (split === "all") {
     if (!active.length) {
@@ -278,7 +313,7 @@ function resolveParticipants({ split, mentionTokens, mentionedJids, members, pay
 
   for (const token of mentionTokens) {
     if (isMeToken(token)) {
-      found.set(payer.jid, { jid: payer.jid, name: publicLabel(payer) })
+      found.set(recorder.jid, { jid: recorder.jid, name: publicLabel(recorder) })
       continue
     }
     const matches = matchName(members, token)
@@ -286,7 +321,7 @@ function resolveParticipants({ split, mentionTokens, mentionedJids, members, pay
       // WhatsApp mentions already resolved by JID; leftover @Name text is not a sheet alias.
       if ((mentionedJids || []).length) continue
       throw new Error(
-        `No member matches @${token}. Use a WhatsApp mention, a sheet name/alias, or me. Example: /paid 850 dinner /split equal me @You`,
+        `No member matches @${token}. Use a WhatsApp mention, a sheet name/alias, or me. Example: /paid 850 dinner /split equal me @Name`,
       )
     }
     if (matches.length > 1) {
@@ -298,7 +333,7 @@ function resolveParticipants({ split, mentionTokens, mentionedJids, members, pay
   }
 
   if (!found.size) {
-    throw new Error("Name who to split with. Example: /paid 850 dinner /split equal me @You")
+    throw new Error("Name who to split with. Example: /paid 850 dinner /split equal me @Name")
   }
 
   return [...found.values()]

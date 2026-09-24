@@ -36,6 +36,39 @@ function parsePaid(raw) {
 
   const left = raw.slice(0, splitAt).trim()
   const right = raw.slice(splitAt).trim()
+  const head = parsePaidHead(left)
+  if (head.kind === "error") return head
+
+  const { payerToken, amountRaw, description } = head
+
+  const splitMatch = right.match(/^\/split\s+equal\s+(.+)$/i)
+  if (splitMatch) {
+    return parseEqualSplit({ payerToken, amountRaw, description, rest: splitMatch[1] })
+  }
+
+  return parseCustomSplit({ payerToken, amountRaw, description, right })
+}
+
+function parsePaidHead(left) {
+  if (/^\/paid\s+by\s+/i.test(left)) {
+    const byMatch = left.match(/^\/paid\s+by\s+(\S+)\s+(\S+)\s+(.+)$/i)
+    if (!byMatch) {
+      return {
+        kind: "error",
+        error: "Usage: /paid by @Name 1000 dinner /split equal all",
+      }
+    }
+    const payerToken = normalizeMentionToken(byMatch[1])
+    const description = byMatch[3].trim()
+    if (!payerToken) {
+      return { kind: "error", error: "Who paid? Example: /paid by @Name 1000 dinner /split equal all" }
+    }
+    if (!description) {
+      return { kind: "error", error: "Add a short description, e.g. dinner" }
+    }
+    return { kind: "ok", payerToken, amountRaw: byMatch[2], description }
+  }
+
   const paidMatch = left.match(/^\/paid\s+(\S+)\s+(.+)$/i)
   if (!paidMatch) {
     return {
@@ -44,7 +77,6 @@ function parsePaid(raw) {
     }
   }
 
-  const amountRaw = paidMatch[1]
   const description = paidMatch[2].trim()
   if (!description) {
     return {
@@ -53,15 +85,10 @@ function parsePaid(raw) {
     }
   }
 
-  const splitMatch = right.match(/^\/split\s+equal\s+(.+)$/i)
-  if (splitMatch) {
-    return parseEqualSplit(amountRaw, description, splitMatch[1])
-  }
-
-  return parseCustomSplit(amountRaw, description, right)
+  return { kind: "ok", payerToken: null, amountRaw: paidMatch[1], description }
 }
 
-function parseEqualSplit(amountRaw, description, rest) {
+function parseEqualSplit({ payerToken, amountRaw, description, rest }) {
   const tokens = rest.trim().split(/\s+/).filter(Boolean)
   const mentionTokens = tokens
     .filter((token) => normalizeMentionToken(token) !== "all")
@@ -74,24 +101,24 @@ function parseEqualSplit(amountRaw, description, rest) {
     return { kind: "error", error: "Use either all or named people, not both" }
   }
   if (hasAll) {
-    return { kind: "paid", amountRaw, description, split: "all", mentionTokens: [] }
+    return { kind: "paid", payerToken, amountRaw, description, split: "all", mentionTokens: [] }
   }
   if (!mentionTokens.length) {
     return {
       kind: "error",
-      error: "Name who to split with. Example: /paid 850 dinner /split equal me @You",
+      error: "Name who to split with. Example: /paid 850 dinner /split equal me @Name",
     }
   }
 
-  return { kind: "paid", amountRaw, description, split: "named", mentionTokens }
+  return { kind: "paid", payerToken, amountRaw, description, split: "named", mentionTokens }
 }
 
-function parseCustomSplit(amountRaw, description, right) {
+function parseCustomSplit({ payerToken, amountRaw, description, right }) {
   const splitMatch = right.match(/^\/split\s+(.+)$/i)
   if (!splitMatch) {
     return {
       kind: "error",
-      error: "Use /split equal all or /split me 700 @You 300",
+      error: "Use /split equal all or /split me 700 @Name 300",
     }
   }
 
@@ -99,13 +126,13 @@ function parseCustomSplit(amountRaw, description, right) {
   if (!tokens.length) {
     return {
       kind: "error",
-      error: "Add split pairs: person amount person amount. Example: /split me 400 @You 600",
+      error: "Add split pairs: person amount person amount. Example: /split me 400 @Name 600",
     }
   }
   if (tokens.length % 2 !== 0) {
     return {
       kind: "error",
-      error: "Custom split needs person-and-amount pairs. Example: /split me 700 @You 300",
+      error: "Custom split needs person-and-amount pairs. Example: /split me 700 @Name 300",
     }
   }
 
@@ -134,7 +161,7 @@ function parseCustomSplit(amountRaw, description, right) {
     pairs.push({ personToken, amountRaw: shareAmountRaw })
   }
 
-  return { kind: "paid", amountRaw, description, split: "custom", pairs }
+  return { kind: "paid", payerToken, amountRaw, description, split: "custom", pairs }
 }
 
 function normalizeMentionToken(token) {
@@ -146,16 +173,27 @@ function normalizeMentionToken(token) {
 }
 
 export const HELP_TEXT = [
-  "Expense bot commands:",
+  "*Trip expense bot*",
+  "",
+  "*You paid*",
   "/paid 1000 dinner /split equal all",
-  "paid 1000 dinner /split equal me @You",
-  "/paid 1000 dinner /split me 400 @You 600",
-  "names can be me, @ mention, or sheet names; alternate person and amount",
+  "/paid 1000 dinner /split equal me @Name",
+  "",
+  "*Someone else paid* (you enter it)",
+  "/paid by @Name 1000 dinner /split equal all",
+  "",
+  "*Unequal split*",
+  "Alternate person and amount; shares must sum to the paid total.",
+  "/paid 1000 dinner /split me 400 @Name 600",
+  "",
+  "*Reports*",
   "/balance",
   "/summary",
+  "",
+  "*Other*",
   "/undo",
   "/status",
   "",
-  "Amounts are rupees (850 or 850.50), at most 2 decimal places",
-  "Unequal shares must sum exactly to the paid amount",
+  "_Amounts:_ rupees (850 or 850.50), at most 2 decimal places.",
+  "_Names in splits:_ me = you (sender), @mention, or sheet name/alias.",
 ].join("\n")

@@ -7,6 +7,7 @@ export const TXN_HEADERS = [
   "expense_at",
   "description",
   "payer_name",
+  "entered_by_name",
   "amount_formatted",
   "participant_names",
   "status",
@@ -14,6 +15,7 @@ export const TXN_HEADERS = [
   "wa_message_id",
   "timestamp",
   "payer_jid",
+  "entered_by_jid",
   "participant_jids",
   "split_count",
   "shares_json",
@@ -217,11 +219,17 @@ export class Ledger {
    * Reverse the caller's latest active transaction.
    * @returns {{ original: object, reversal: object } | null}
    */
-  async undoLatest(payerJid, undoMessageId) {
+  async undoLatest(actorJid, undoMessageId) {
     const existing = await this.listTransactions()
+    const want = normalizeJid(actorJid)
     const original = [...existing]
       .reverse()
-      .find((txn) => txn.status === "active" && txn.payerJid === payerJid)
+      .find((txn) => {
+        if (txn.status !== "active") return false
+        if (normalizeJid(txn.payerJid) === want) return true
+        const entered = String(txn.enteredByJid || "").trim()
+        return entered && normalizeJid(entered) === want
+      })
     if (!original) return null
 
     const reversal = {
@@ -230,6 +238,8 @@ export class Ledger {
       timestamp: new Date().toISOString(),
       payerJid: original.payerJid,
       payerName: original.payerName,
+      enteredByJid: original.enteredByJid || original.payerJid,
+      enteredByName: original.enteredByName || original.payerName,
       amountPaise: original.amountPaise,
       amountFormatted: original.amountFormatted,
       description: `undo ${original.description}`,
@@ -394,6 +404,7 @@ function txnToRow(txn) {
     expense_at: txn.expenseAt ?? "",
     description: txn.description,
     payer_name: txn.payerName,
+    entered_by_name: txn.enteredByName || txn.payerName || "",
     amount_formatted: txn.amountFormatted,
     participant_names: txn.participantNames.join(","),
     status: txn.status,
@@ -401,6 +412,7 @@ function txnToRow(txn) {
     wa_message_id: txn.waMessageId,
     timestamp: txn.timestamp,
     payer_jid: txn.payerJid,
+    entered_by_jid: txn.enteredByJid || txn.payerJid || "",
     participant_jids: txn.participantJids.join(","),
     split_count: String(txn.splitCount),
     shares_json: JSON.stringify(txn.shares),
@@ -428,6 +440,8 @@ function rowToTxn(row) {
     timestamp: String(row.timestamp || "").trim(),
     payerJid: String(row.payer_jid || "").trim(),
     payerName: String(row.payer_name || "").trim(),
+    enteredByJid: String(row.entered_by_jid || "").trim(),
+    enteredByName: String(row.entered_by_name || "").trim(),
     amountPaise: shareTotal || (parsed.ok ? parsed.paise : 0),
     amountFormatted: String(row.amount_formatted || "").trim(),
     description: String(row.description || "").trim(),

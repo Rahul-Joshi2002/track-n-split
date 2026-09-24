@@ -23,7 +23,7 @@ Do not install packages globally. From this folder only: `npm install` / `npm ci
 You already have the sheet ID and service-account JSON. You still need a pairing secret, and (recommended) your phone number. Leave `GROUP_JID` empty on the first run.
 
 ```bash
-cd /Users/rahuljoshi/local/trip-expense-bot
+cd trip-expense-bot
 cp .env.example .env
 ```
 
@@ -41,7 +41,7 @@ PORT=3000
 Then:
 
 ```bash
-cd /Users/rahuljoshi/local/trip-expense-bot
+cd trip-expense-bot
 npm install
 npm start
 ```
@@ -72,20 +72,24 @@ Also confirm the sheet is shared with the service account email, and that the `M
 /help
 /status
 /paid 850 dinner /split equal all
+/paid by @Alice 1000 dinner /split equal all
 /paid amount description /split equal all
+/paid 1000 dinner /split equal me @Bob
 /paid 1000 dinner /split me 400 @You 600
+/paid 1000 lunch /split @Alice 600 @Bob 400
 /paid amount description /split person amount person amount …
 /balance
 /summary
 /undo
 ```
 
-- `/paid … /split equal all` — sender pays; split across every **active** member, including the payer.
-- `/paid … /split equal me @You` — named people (WhatsApp mentions and/or names from the Members sheet) are the full list. The payer is **not** added unless named. Use `me`, `@You`, `they`, or sheet names.
-- `/paid … /split me 700 @You 300` — unequal shares: alternate **person** and **amount**; each person once; share amounts must **sum exactly** to the paid total. Names can be `me`, `@You`, `they`, or sheet names. No `all`.
+- `/paid … /split equal all` — **you** pay (unless `by` is used); split across every **active** member, including the payer.
+- `/paid by @Alice … /split …` — **Alice** is the payer; **you** are recorded in `entered_by_*` on the sheet. Omit `by` when you paid yourself.
+- `/paid … /split equal me @Bob` — named people (WhatsApp mentions and/or names from the Members sheet) are the full list. The payer is **not** added unless named. **`me` in a split** = message sender (not necessarily the payer).
+- `/paid … /split me 700 @You 300` or `/split @Alice 600 @Bob 400` — unequal shares: alternate **person** and **amount**; each person once; share amounts must **sum exactly** to the paid total. No `all`.
 - Amounts are rupees (`850`, `850.50`). Stored as integer paise.
 - Equal-split remainder (1 paise) goes to members in **JID order**.
-- `/undo` reverses the caller’s latest active expense. Rows are never deleted.
+- `/undo` reverses your latest active expense where **you are the payer or entered the row** (proxy entries can be undone by payer or recorder). Rows are never deleted.
 - Unknown senders are rejected.
 
 ## 1. Google Sheet
@@ -98,13 +102,13 @@ Create one spreadsheet with two tabs. Row 1 headers must be:
 
 **Transactions**
 
-`serial` | `expense_at` | `description` | `payer_name` | `amount_formatted` | `participant_names` | `status` | `id` | `wa_message_id` | `timestamp` | `payer_jid` | `participant_jids` | `split_count` | `shares_json` | `command_text` | `reverses_id` | `reversed_by_id`
+`serial` | `expense_at` | `description` | `payer_name` | `entered_by_name` | `amount_formatted` | `participant_names` | `status` | `id` | `wa_message_id` | `timestamp` | `payer_jid` | `entered_by_jid` | `participant_jids` | `split_count` | `shares_json` | `command_text` | `reverses_id` | `reversed_by_id`
 
 `expense_at` is human-readable local time (default timezone `Asia/Kolkata`; override with `EXPENSE_TIMEZONE`). `timestamp` stays ISO UTC for the bot.
 
 Leave Transactions empty (no header row) on a fresh setup: the bot writes row 1 on startup. Fill Members after the first WhatsApp connect (the bot logs participant JIDs).
 
-`active` is `TRUE` or `FALSE`. `aliases` is comma-separated (`asha,ash`).
+`active` is `TRUE` or `FALSE`. `aliases` is comma-separated (e.g. Alice → `alice,ali`; Bob → `bob,bobby`).
 
 Copy the sheet ID from the URL:
 
