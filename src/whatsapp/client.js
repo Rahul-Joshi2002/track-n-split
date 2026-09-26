@@ -27,6 +27,8 @@ export function startWhatsApp({ config, state, ledger, handleCommand }) {
   let pairingRequested = false
   let shuttingDown = false
   let reconnectTimer = null
+  /** Greeting + member JID sync on first open after pair, or after loggedOut + re-pair. Not on 428-style reconnects. */
+  let runPostConnectSetup = true
 
   async function connect() {
     if (shuttingDown) return
@@ -80,7 +82,12 @@ export function startWhatsApp({ config, state, ledger, handleCommand }) {
         state.pairingCode = null
         state.connectedAt = new Date()
         console.log("WhatsApp connected.")
-        await onOpen(sock)
+        if (runPostConnectSetup) {
+          await onOpen(sock)
+          runPostConnectSetup = false
+        } else {
+          console.log("Reconnect only; skipping group online message and participant sync.")
+        }
       }
 
       if (connection === "close") {
@@ -91,6 +98,7 @@ export function startWhatsApp({ config, state, ledger, handleCommand }) {
         if (shuttingDown) return
         if (loggedOut) {
           console.log("WhatsApp logged out. Resetting in-memory session. Scan /pair again.")
+          runPostConnectSetup = true
           auth = createInMemoryAuth()
           pairingRequested = false
           state.qr = null
