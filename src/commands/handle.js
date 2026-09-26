@@ -2,7 +2,7 @@ import { HELP_TEXT, parseCommand } from "./parse.js"
 import { formatPaise, parseRupeesToPaise } from "../ledger/money.js"
 import { splitEqual } from "../ledger/split.js"
 import { computeNets, suggestSettlements, totalSpent } from "../ledger/settle.js"
-import { newTxnId, normalizeJid } from "../ledger/sheets.js"
+import { formatExpenseAt, newTxnId, normalizeJid } from "../ledger/sheets.js"
 
 /**
  * @param {object} opts
@@ -197,10 +197,13 @@ async function formatStatus(state, startedAt, ledger) {
   } catch {
     sheets = "error"
   }
+  const startedIst = formatExpenseAt(startedAt)
   return [
-    `WhatsApp: ${state.whatsapp}`,
-    `Sheets: ${sheets}`,
-    `Started: ${startedAt.toISOString()}`,
+    "*Status*",
+    "",
+    `*WhatsApp:* _${state.whatsapp}_`,
+    `*Sheets:* _${sheets}_`,
+    `*Started (IST):* _${startedIst}_`,
   ].join("\n")
 }
 
