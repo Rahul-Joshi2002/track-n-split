@@ -114,7 +114,7 @@ async function handlePaid({ parsed, input, members, sender, ledger }) {
 
   if (result === "duplicate") return null
 
-  const lines = ["*Transaction recorded*", ""]
+  const lines = ["*Transaction recorded*"]
   lines.push(`${txn.payerName} paid *${txn.amountFormatted}* for _${txn.description}_`)
   if (normalizeJid(txn.payerJid) !== normalizeJid(txn.enteredByJid)) {
     lines.push(`Entered by ${txn.enteredByName}`)
@@ -139,7 +139,6 @@ async function handleUndo({ input, sender, ledger }) {
   const { original } = result
   return [
     "*Transaction reversed*",
-    "",
     `${original.payerName} paid *${original.amountFormatted}* for _${original.description}_`,
   ].join("\n")
 }
@@ -164,10 +163,8 @@ async function handleReport({ kind, members, ledger }) {
     lines.push(`*Total spent:* ${formatPaise(totalSpent(active))}`)
     lines.push("")
     lines.push("*Balances*")
-    lines.push("")
   } else {
     lines.push("*Balances*")
-    lines.push("")
   }
 
   for (const net of nets) {
@@ -199,8 +196,6 @@ async function formatStatus(state, startedAt, ledger) {
   }
   const startedIst = formatExpenseAt(startedAt)
   return [
-    "*Status*",
-    "",
     `*WhatsApp:* _${state.whatsapp}_`,
     `*Sheets:* _${sheets}_`,
     `*Started (IST):* _${startedIst}_`,

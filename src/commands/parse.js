@@ -30,7 +30,7 @@ function parsePaid(raw) {
   if (splitAt === -1) {
     return {
       kind: "error",
-      error: "Add a split. Example: /paid 850 dinner /split equal all",
+      error: "Add a split with correct syntax. Use /help for examples.",
     }
   }
 
@@ -55,7 +55,7 @@ function parsePaidHead(left) {
     if (!byMatch) {
       return {
         kind: "error",
-        error: "Usage: /paid by @Name 1000 dinner /split equal all",
+        error: "Add a split with correct syntax. Use /help for examples.",
       }
     }
     const payerToken = normalizeMentionToken(byMatch[1])
